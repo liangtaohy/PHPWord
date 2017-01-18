@@ -71,6 +71,29 @@ class Text extends AbstractElement
 
         $content = '';
         $content .= $this->writeOpening();
+        /*
+        $tabStyles = $element->getTabStyle();
+        $tabNum = 0;
+        foreach ($tabStyles as $tabStyle) {
+            if ($tabStyle->getType() === \PhpOffice\PhpWord\Style\Tab::TAB_STOP_CLEAR) {
+                $val = \PhpOffice\PhpWord\Reader\Word2007\Settings::$Settings['defaultTabStop'];
+                $tabNum += intval($val/20);
+            } elseif ($tabStyle->getType() === \PhpOffice\PhpWord\Style\Tab::TAB_STOP_NUM) {
+                $tabNum += intval($val/20);
+            }
+        }
+
+        $tab = '';
+
+        for ($i=0;$i<$tabNum;$i++) {
+            $tab .= '&emsp;';
+        }
+
+        if (!empty($tab)) {
+            $content .= '<span>' . $tab . '</span>';
+        }
+        */
+
         $content .= $this->openingText;
         $content .= $this->openingTags;
         if (Settings::isOutputEscapingEnabled()) {

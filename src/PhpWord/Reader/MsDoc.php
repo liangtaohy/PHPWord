@@ -19,7 +19,46 @@ namespace PhpOffice\PhpWord\Reader;
 
 use PhpOffice\Common\Drawing;
 use PhpOffice\PhpWord\PhpWord;
+use PhpOffice\PhpWord\Style;
 use PhpOffice\PhpWord\Shared\OLERead;
+
+define('P_HEADER_SZ',		28);
+define('P_SECTIONLIST_SZ',	20);
+define('P_LENGTH_SZ',		 4);
+define('P_SECTION_MAX_SZ',	(2 * P_SECTIONLIST_SZ + P_LENGTH_SZ));
+//define P_SECTION_SZ(x)		((x) * P_SECTIONLIST_SZ + P_LENGTH_SZ)
+
+define('PID_CODEPAGE', 1); // code page定义
+define('PID_TITLE',		 2);
+define('PID_SUBJECT',    3);
+define('PID_AUTHOR',		 4);
+define('PID_CREATE_DTM',		12);
+define('PID_LASTSAVE_DTM',	13);
+define('PID_APPNAME',		18);
+define('PIDSI_PAGECOUNT', 0x0E);
+define('PIDSI_WORDCOUNT', 0x0F);
+define('PIDSI_CHARCOUNT', 0x10);
+
+define('PIDD_MANAGER',		14);
+define('PIDD_COMPANY',		15);
+
+/**
+ * VT_ definitions
+ * https://msdn.microsoft.com/en-us/library/aa380072(v=vs.85).aspx
+ */
+define('VT_LPSTR',		30);
+define('VT_FILETIME',		64);
+define('VT_I2', 2); // Two bytes representing a 2-byte signed integer value.
+define('VT_I4', 3); // 4-byte signed integer value.
+define('VT_INT', 22); // 4-byte signed integer value (equivalent to VT_I4).
+define('VT_UINT', 23); // 4-byte unsigned integer (equivalent to VT_UI4).
+define('VT_DATE', 7); // A 64-bit floating point number representing the number of days (not seconds) since December 31, 1899. For example, January 1, 1900, is 2.0, January 2, 1900, is 3.0, and so on). This is stored in the same representation as VT_R8.
+define('VT_CLSID', 72); // Pointer to a class identifier (CLSID) (or other globally unique identifier (GUID)).
+
+define('TIME_OFFSET_HI', 0x019db1de);
+define('TIME_OFFSET_LO', 0xd53e8000);
+
+define('ECHO_DEBUG_ENABLE', 0);
 
 /**
  * Reader for Word97
@@ -80,6 +119,11 @@ class MsDoc extends AbstractReader implements ReaderInterface
      */
     private $arraySections = array();
 
+    /**
+     * @var array
+     */
+    private $docInfo = array();
+
     const VERSION_97 = '97';
     const VERSION_2000 = '2000';
     const VERSION_2002 = '2002';
@@ -109,6 +153,50 @@ class MsDoc extends AbstractReader implements ReaderInterface
     const MSOBLIPTIFF = 0x11;
     const MSOBLIPCMYKJPEG = 0x12;
 
+    const BIT_30 = 0x40000000;
+    const BIG_BLOCK_SIZE = 512;
+
+    static $OLEBytes = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
+
+    static $DOSBytes = [0x31, 0xbe, 0x00, 0x00, 0x00, 0xab];
+
+    static $MacBytes = [
+        [0xfe, 0x37, 0x00, 0x1c, 0x00, 0x00],
+        [0xfe, 0x37, 0x00, 0x23, 0x00, 0x00]
+    ];
+
+    static $RTFBytes = ['{', '\\', 'r', 't', 'f', '1'];
+
+    static $Win12Bytes = [
+        [0x9b, 0xa5, 0x21, 0x00],	/* Win Word 1.x */
+        [0xdb, 0xa5, 0x2d, 0x00],	/* Win Word 2.0 */
+    ];
+
+    static $WPBytes = [0xff, 'W', 'P', 'C'];
+
+    /**
+     * Week Maps
+     * @var array
+     */
+    static $WDYMaps = [
+        'en'    => ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
+        'ch'    => ['星期天', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'],
+    ];
+
+    /**
+     * Month Maps
+     * @var array
+     */
+    static $MONMaps = [
+        'en'    => ['Undefined', 'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
+        'ch'    => ['非法', '一月', '二月', '三月', '四月', '五月', '六月', '七月', '八月', '九月', '十月', '十一月', '十二月'],
+    ];
+
+    public static $CodePage = array(
+        936   => 'CP936',
+        10008   => 'GB2312', // x-mac-chinesesimp	MAC Simplified Chinese (GB 2312); Chinese Simplified (Mac)
+    );
+
     /**
      * Loads PhpWord from file
      *
@@ -121,8 +209,16 @@ class MsDoc extends AbstractReader implements ReaderInterface
 
         $this->loadOLE($filename);
 
+
+        $docInfo = $this->getSystemInformation($this->_SummaryInformation);
+        $docInfo += $this->getDocumentSummaryInfo($this->_DocumentSummaryInformation);
         $this->readFib($this->dataWorkDocument);
         $this->readFibContent();
+        $this->setDocInfo($docInfo);
+        /*
+         * dump Txt
+         */
+        //echo $this->generateTxt();
 
         return $this->phpWord;
     }
@@ -149,6 +245,20 @@ class MsDoc extends AbstractReader implements ReaderInterface
         $this->_SummaryInformation = $ole->getStream($ole->summaryInformation);
         // Get Document Summary Information data
         $this->_DocumentSummaryInformation = $ole->getStream($ole->docSummaryInfos);
+    }
+
+    private function setDocInfo(&$docInfo)
+    {
+        $this->phpWord->getDocInfo()->setTitle(isset($docInfo['title']) ? $docInfo['title'] : '');
+        $this->phpWord->getDocInfo()->setSubject(isset($docInfo['subject']) ? $docInfo['subject'] : '');
+        $this->phpWord->getDocInfo()->setCompany(isset($docInfo['company']) ? $docInfo['company'] : '');
+        $this->phpWord->getDocInfo()->setManager(isset($docInfo['manager']) ? $docInfo['manager'] : '');
+        $this->phpWord->getDocInfo()->setCreator(isset($docInfo['author']) ? $docInfo['author'] : '');
+        $this->phpWord->getDocInfo()->setCreated(isset($docInfo['created']) ? $docInfo['created'] : '');
+        $this->phpWord->getDocInfo()->setModified(isset($docInfo['lastModified']) ? $docInfo['lastModified'] : '');
+
+        $this->phpWord->getDocInfo()->setMainStreamSize($this->arrayFib['ccpText']);
+        $this->phpWord->getDocInfo()->setCommentSize($this->arrayFib['ccpAtn']);
     }
 
     private function getNumInLcb($lcb, $iSize)
@@ -278,12 +388,16 @@ class MsDoc extends AbstractReader implements ReaderInterface
         // reserved3
         $pos += 4;
         // ccpAtn
+        $this->arrayFib['ccpAtn'] = self::getInt4d($data, $pos);
         $pos += 4;
         // ccpEdn
+        $this->arrayFib['ccpEdn'] = self::getInt4d($data, $pos);
         $pos += 4;
         // ccpTxbx
+        $this->arrayFib['ccpTxbx'] = self::getInt4d($data, $pos);
         $pos += 4;
         // ccpHdrTxbx
+        $this->arrayFib['ccpHdrTxbx'] = self::getInt4d($data, $pos);
         $pos += 4;
         // reserved4
         $pos += 4;
@@ -310,6 +424,9 @@ class MsDoc extends AbstractReader implements ReaderInterface
 
         //----- cbRgFcLcb
         $cbRgFcLcb = self::getInt2d($data, $pos);
+        if (defined('ECHO_DEBUG_ENABLE') && ECHO_DEBUG_ENABLE) {
+            echo "cbRgFcLcb: $pos," . dechex($cbRgFcLcb) . "\n";
+        }
         $pos += 2;
         //----- fibRgFcLcbBlob
         switch ($cbRgFcLcb) {
@@ -345,6 +462,9 @@ class MsDoc extends AbstractReader implements ReaderInterface
 
         if ($this->arrayFib['cswNew'] != 0) {
             //@todo : fibRgCswNew
+            if (defined('ECHO_DEBUG_ENABLE') && ECHO_DEBUG_ENABLE) {
+                echo "\nneed read fibRgCswNew\n";
+            }
         }
 
         return $pos;
@@ -375,7 +495,7 @@ class MsDoc extends AbstractReader implements ReaderInterface
             $pos += 4;
             $this->arrayFib['fcPlcfandTxt'] = self::getInt4d($data, $pos);
             $pos += 4;
-            $this->arrayFib['lcbPlcfandTxt '] = self::getInt4d($data, $pos);
+            $this->arrayFib['lcbPlcfandTxt'] = self::getInt4d($data, $pos);
             $pos += 4;
             $this->arrayFib['fcPlcfSed'] = self::getInt4d($data, $pos);
             $pos += 4;
@@ -1107,13 +1227,16 @@ class MsDoc extends AbstractReader implements ReaderInterface
 
         // reading paragraphs
         //@link https://github.com/notmasteryet/CompoundFile/blob/ec118f354efebdee9102e41b5b7084fce81125b0/WordFileReader/WordDocument.cs#L86
-        $this->readRecordPlcfBtePapx();
+        // $this->readRecordPlcfBtePapx();
 
         // reading character formattings
         //@link https://github.com/notmasteryet/CompoundFile/blob/ec118f354efebdee9102e41b5b7084fce81125b0/WordFileReader/WordDocument.cs#L94
-        $this->readRecordPlcfBteChpx();
+        // $this->readRecordPlcfBteChpx();
 
-        $this->generatePhpWord();
+        // $this->generatePhpWord();
+
+        // reading paragraphs
+        $this->getRecordPlcfBtePapx();
     }
 
     /**
@@ -1151,6 +1274,10 @@ class MsDoc extends AbstractReader implements ReaderInterface
 
         foreach ($aSed as $offsetSed) {
             // Sepx : http://msdn.microsoft.com/en-us/library/dd921348%28v=office.12%29.aspx
+            if (!isset($this->dataWorkDocument[$offsetSed])) {
+                continue;
+            }
+
             $cb = self::getInt2d($this->dataWorkDocument, $offsetSed);
             $offsetSed += 2;
 
@@ -1221,215 +1348,84 @@ class MsDoc extends AbstractReader implements ReaderInterface
     }
 
     /**
+     * Read PlcfBtePapx
+     *
      * Paragraph and information about them
-     * @link http://msdn.microsoft.com/en-us/library/dd908569%28v=office.12%29.aspx
+     *
+     * https://msdn.microsoft.com/en-us/library/dd908569(v=office.12).aspx
      */
-    private function readRecordPlcfBtePapx()
+    private function getRecordPlcfBtePapx()
     {
-        $posMem = $this->arrayFib['fcPlcfBtePapx'];
-        $num = $this->getNumInLcb($this->arrayFib['lcbPlcfBtePapx'], 4);
-        $posMem += 4 * ($num + 1);
-        $arrAPnBtePapx = $this->getArrayCP($this->data1Table, $posMem, $num);
-        $posMem += 4 * $num;
+        $arrayParagraphs = array();
 
-        foreach ($arrAPnBtePapx as $aPnBtePapx) {
-            $offsetBase = $aPnBtePapx * 512;
+        $pos = $this->arrayFib['fcPlcfBtePapx'];
+        $isize = $this->arrayFib['lcbPlcfBtePapx'];
+
+        $num = $this->getNumInLcb($isize, 4);
+
+        $pos += 4 * ($num + 1); // skip aFCs
+
+        $aPnBtePapx = array();
+
+        for($i=0; $i < $num; $i++) {
+            $aPnBtePapx[$i] = self::getInt4d($this->data1Table, $pos) & 0x3FFFFF; // 22bits, 10bit unused
+            $pos += 4;
+        }
+
+        for($i = 0; $i < $num; $i++) {
+            $offsetBase = $aPnBtePapx[$i] * 512; // offset: pn*512
             $offset = $offsetBase;
 
-            $string = '';
+            $cpara = self::getInt1d($this->dataWorkDocument, $offset + 511);
 
-            $numRun = self::getInt1d($this->dataWorkDocument, $offset + 511);
-            $arrayRGFC = array();
-            for ($inc = 0; $inc <= $numRun; $inc++) {
-                $arrayRGFC[$inc] = self::getInt4d($this->dataWorkDocument, $offset);
+            $arrayFCs = array();
+            for ($j = 0; $j <= $cpara; $j++) { // the number of rgfcs is cpara + 1
+                $arrayFCs[$j] = self::getInt4d($this->dataWorkDocument, $offset);
                 $offset += 4;
             }
-            $arrayRGB = array();
-            for ($inc = 1; $inc <= $numRun; $inc++) {
-                // @link http://msdn.microsoft.com/en-us/library/dd925804(v=office.12).aspx
-                $arrayRGB[$inc] = self::getInt1d($this->dataWorkDocument, $offset);
+
+            $arrayRGBs = array();
+            for ($j = 1; $j <= $cpara; $j++) {
+                $arrayRGBs[$j] = self::getInt1d($this->dataWorkDocument, $offset);
                 $offset += 1;
-                // reserved
-                $offset += 12;
+                $offset += 12; // reserved skipped (12 bytes)
             }
 
-            foreach (array_keys($arrayRGFC) as $key) {
-                if (!isset($arrayRGFC[$key + 1])) {
-                    break;
-                }
-                $strLen = $arrayRGFC[$key + 1] - $arrayRGFC[$key] - 1;
-                for ($inc = 0; $inc < $strLen; $inc++) {
-                    $byte = self::getInt1d($this->dataWorkDocument, $arrayRGFC[$key] + $inc);
-                    if ($byte > 0) {
-                        $string .= chr($byte);
-                    }
-                }
-            }
-            $this->arrayParagraphs[] = $string;
-
-            //@todo readPrl for paragraphs
-            /*// use $this->readPrl()
-            foreach ($arrayRGB as $key => $rgb) {
+            $styles = array();
+            for ($j = 1; $j <= $cpara; $j++) {
+                $rgb = $arrayRGBs[$j];
                 $offset = $offsetBase + ($rgb * 2);
 
                 $cb = self::getInt1d($this->dataWorkDocument, $offset);
                 $offset += 1;
-                print_r('$cb : '.$cb.PHP_EOL);
                 if ($cb == 0) {
                     $cb = self::getInt1d($this->dataWorkDocument, $offset);
                     $cb = $cb * 2;
                     $offset += 1;
-                    print_r('$cb0 : '.$cb.PHP_EOL);
                 } else {
                     $cb = $cb * 2 - 1;
-                    print_r('$cbD : '.$cb.PHP_EOL);
                 }
                 $istd = self::getInt2d($this->dataWorkDocument, $offset);
                 $offset += 2;
                 $cb -= 2;
-                print_r('$istd : '.$istd.($istd == 0 ? ' (Normal)' : '').PHP_EOL);
+
                 if ($cb > 0) {
-                    do{
-                        $sprm = self::getInt2d($this->dataWorkDocument, $offset);
-                        $offset += 2;
-                        $cb -= 2;
-                        $sprm_IsPmd = $sprm & 0x01FF;
-                        $sprm_F = ($sprm/512) & 0x0001;
-                        $sprm_Sgc = ($sprm/1024) & 0x0007;
-                        $sprm_Spra = ($sprm/8192);
-
-                        print_r('$sprm : 0x'.dechex($sprm).PHP_EOL);
-                        print_r('$sprm.ispmd : 0x'.dechex($sprm_IsPmd).PHP_EOL);
-                        print_r('$sprm.f : 0x'.dechex($sprm_F).PHP_EOL);
-                        print_r('$sprm.sgc : 0x'.dechex($sprm_Sgc));
-                        switch(dechex($sprm_Sgc)) {
-                            case 0x01:
-                                print_r(' (Paragraph property)');
-                                break;
-                            case 0x02:
-                                print_r(' (Character property)');
-                                break;
-                            case 0x03:
-                                print_r(' (Picture property)');
-                                break;
-                            case 0x04:
-                                print_r(' (Section property)');
-                                break;
-                            case 0x05:
-                                print_r(' (Table property)');
-                                break;
-                        }
-                        print_r(PHP_EOL);
-                        print_r('$sprm.spra : 0x'.dechex($sprm_Spra).PHP_EOL);
-                        switch(dechex($sprm_Spra)) {
-                            case 0x0:
-                                $operand = self::getInt1d($this->dataWorkDocument, $offset);
-                                $offset += 1;
-                                $cb -= 1;
-                                switch(dechex($operand)) {
-                                    case 0x00:
-                                        $operand = 'OFF';
-                                        break;
-                                    case 0x01:
-                                        $operand = 'ON';
-                                        break;
-                                    case 0x80:
-                                        $operand = 'CURRENT VALUE';
-                                        print_r(''.PHP_EOL.PHP_EOL);
-                                        break;
-                                    case 0x81:
-                                        $operand = 'OPPOSITE OF THE CURRENT VALUE';
-                                        break;
-                                }
-                                break;
-                            case 0x1:
-                                $operand = self::getInt1d($this->dataWorkDocument, $offset);
-                                $offset += 1;
-                                $cb -= 1;
-                                print_r('$operand : 0x'.dechex($operand).PHP_EOL);
-                                break;
-                            case 0x2:
-                            case 0x4:
-                            case 0x5:
-                                $operand = self::getInt2d($this->dataWorkDocument, $offset);
-                                $offset += 2;
-                                $cb -= 2;
-                                print_r('$operand : 0x'.dechex($operand).PHP_EOL);
-                                break;
-                            case 0x3:
-                                if ($sprm_IsPmd != 0x70) {
-                                    $operand = self::getInt4d($this->dataWorkDocument, $offset);
-                                    $offset += 4;
-                                    $cb -= 4;
-                                    print_r('$operand : 0x'.dechex($operand).PHP_EOL);
-                                }
-                                break;
-                            case 0x7:
-                                $operand = self::getInt3d($this->dataWorkDocument, $offset);
-                                $offset += 3;
-                                $cb -= 3;
-                                print_r('$operand : 0x'.dechex($operand).PHP_EOL);
-                                break;
-                            default:
-                                print_r('YO YO YO : '.PHP_EOL);
-                        }
-
-                        //
-                        switch(dechex($sprm_Sgc)) {
-                            case 0x01: // Sprm is modifying a paragraph property.
-                                switch($sprm_IsPmd) {
-                                    case 0x0A: // sprmPIlvl
-                                        print_r('sprmPIlvl : '.$operand.PHP_EOL.PHP_EOL);
-                                        break;
-                                    case 0x0B: // sprmPIlfo
-                                        print_r('sprmPIlfo : '.$operand.PHP_EOL.PHP_EOL);
-                                        break;
-                                    default:
-                                        print_r('$sprm_IsPmd(1) : '.$sprm_IsPmd.PHP_EOL.PHP_EOL);
-                                        break;
-                                }
-                                break;
-                            case 0x02: // Sprm is modifying a character property.
-                                switch($sprm_IsPmd) {
-                                    default:
-                                        print_r('$sprm_IsPmd(2) : '.$sprm_IsPmd.PHP_EOL.PHP_EOL);
-                                        break;
-                                }
-                                break;
-                            case 0x03: // Sprm is modifying a picture property.
-                                switch($sprm_IsPmd) {
-                                    default:
-                                        print_r('$sprm_IsPmd(3) : '.$sprm_IsPmd.PHP_EOL.PHP_EOL);
-                                        break;
-                                }
-                                break;
-                            case 0x04: // Sprm is modifying a section property.
-                                switch($sprm_IsPmd) {
-                                    default:
-                                        print_r('$sprm_IsPmd(4) : '.$sprm_IsPmd.PHP_EOL.PHP_EOL);
-                                        break;
-                                }
-                                break;
-                            case 0x05: // Sprm is modifying a table property.
-                                switch($sprm_IsPmd) {
-                                    default:
-                                        print_r('$sprm_IsPmd(4) : '.$sprm_IsPmd.PHP_EOL.PHP_EOL);
-                                        break;
-                                }
-                                break;
-                            default:
-                                print_r('$sprm_Sgc : '.dechex($sprm_Sgc).PHP_EOL.PHP_EOL);
-                                break;
-                        }
-                    } while ($cb > 0);
+                    $styles[$j] = $this->readPrl($this->dataWorkDocument, $offset, $cb);
                 } else {
-                    if ($istd > 0) {
-                        // @todo : Determining Properties of a Paragraph Style
-                        # @link http://msdn.microsoft.com/en-us/library/dd948631%28v=office.12%29.aspx
-                    }
+                    $styles[$j] = null;
                 }
-            }*/
+            }
+
+            $paragraph = new \stdClass();
+
+            $paragraph->aFCs = $arrayFCs;
+            $paragraph->aRGBs = $arrayRGBs;
+            $paragraph->aStyles = $styles;
+
+            $arrayParagraphs[] = $paragraph;
         }
+
+        $this->arrayParagraphs = $arrayParagraphs;
     }
 
     /**
@@ -1441,50 +1437,61 @@ class MsDoc extends AbstractReader implements ReaderInterface
         $posMem = $this->arrayFib['fcPlcfBteChpx'];
         $num = $this->getNumInLcb($this->arrayFib['lcbPlcfBteChpx'], 4);
         $aPnBteChpx = array();
-        for ($inc = 0; $inc <= $num; $inc++) {
+        /*for ($inc = 0; $inc <= $num; $inc++) {
             $aPnBteChpx[$inc] = self::getInt4d($this->data1Table, $posMem);
             $posMem += 4;
-        }
-        $pnFkpChpx = self::getInt4d($this->data1Table, $posMem);
-        $posMem += 4;
+        }*/
 
-        $offsetBase = $pnFkpChpx * 512;
-        $offset = $offsetBase;
+        $posMem += ($num + 1) * 4;
 
-        // ChpxFkp
-        // @link : http://msdn.microsoft.com/en-us/library/dd910989%28v=office.12%29.aspx
-        $numRGFC = self::getInt1d($this->dataWorkDocument, $offset + 511);
-        $arrayRGFC = array();
-        for ($inc = 0; $inc <= $numRGFC; $inc++) {
-            $arrayRGFC[$inc] = self::getInt4d($this->dataWorkDocument, $offset);
-            $offset += 4;
+        for ($i = 1; $i <= $num; $i++) {
+            $aPnBteChpx[$i] = self::getInt4d($this->data1Table, $posMem) & 0x3FFFFF; // 22bits, 10bit unused
+            $posMem += 4;
         }
 
-        $arrayRGB = array();
-        for ($inc = 1; $inc <= $numRGFC; $inc++) {
-            $arrayRGB[$inc] = self::getInt1d($this->dataWorkDocument, $offset);
-            $offset += 1;
-        }
+        for ($i = 1; $i <= $num; $i++) {
+            $pnFkpChpx = $aPnBteChpx[$i];
 
-        $start = 0;
-        foreach ($arrayRGB as $keyRGB => $rgb) {
-            $oStyle = new \stdClass();
-            $oStyle->pos_start = $start;
-            $oStyle->pos_len = (int)ceil((($arrayRGFC[$keyRGB] -1) - $arrayRGFC[$keyRGB -1]) / 2);
-            $start += $oStyle->pos_len;
+            $offsetBase = $pnFkpChpx * 512;
+            $offset = $offsetBase;
 
-            if ($rgb > 0) {
-                // Chp Structure
-                // @link : http://msdn.microsoft.com/en-us/library/dd772849%28v=office.12%29.aspx
-                $posRGB = $offsetBase + $rgb * 2;
-
-                $cb = self::getInt1d($this->dataWorkDocument, $posRGB);
-                $posRGB += 1;
-
-                $oStyle->style = $this->readPrl($this->dataWorkDocument, $posRGB, $cb);
-                $posRGB += $oStyle->style->length;
+            // ChpxFkp
+            // @link : http://msdn.microsoft.com/en-us/library/dd910989%28v=office.12%29.aspx
+            $numRGFC = self::getInt1d($this->dataWorkDocument, $offset + 511);
+            $arrayRGFC = array();
+            for ($inc = 0; $inc <= $numRGFC; $inc++) {
+                $arrayRGFC[$inc] = self::getInt4d($this->dataWorkDocument, $offset);
+                $offset += 4;
             }
-            $this->arrayCharacters[] = $oStyle;
+
+            $arrayRGB = array();
+            for ($inc = 1; $inc <= $numRGFC; $inc++) {
+                $arrayRGB[$inc] = self::getInt1d($this->dataWorkDocument, $offset);
+                $offset += 1;
+            }
+
+            $start = 0;
+            foreach ($arrayRGB as $keyRGB => $rgb) {
+                $oStyle = new \stdClass();
+                $oStyle->pos_start = $start;
+                $oStyle->pos_ori_start = $arrayRGFC[$keyRGB - 1];
+                //$oStyle->pos_len = (int)ceil((($arrayRGFC[$keyRGB] -1) - $arrayRGFC[$keyRGB -1]) / 2);
+                $oStyle->pos_len = $arrayRGFC[$keyRGB] - $arrayRGFC[$keyRGB -1];
+                $start += $oStyle->pos_len;
+
+                if ($rgb > 0) {
+                    // Chp Structure
+                    // @link : http://msdn.microsoft.com/en-us/library/dd772849%28v=office.12%29.aspx
+                    $posRGB = $offsetBase + $rgb * 2;
+
+                    $cb = self::getInt1d($this->dataWorkDocument, $posRGB);
+                    $posRGB += 1;
+
+                    $oStyle->style = $this->readPrl($this->dataWorkDocument, $posRGB, $cb);
+                    $posRGB += $oStyle->style->length;
+                }
+                $this->arrayCharacters[] = $oStyle;
+            }
         }
     }
 
@@ -1595,6 +1602,50 @@ class MsDoc extends AbstractReader implements ReaderInterface
             switch(dechex($oSprm->sgc)) {
                 // Paragraph property
                 case 0x01:
+                    switch($oSprm->isPmd) {
+                        case 0x03: // sprmPJc80
+                            switch($operand)
+                            {
+                                case 0:
+                                    $oStylePrl->alignment = 'left';
+                                    break;
+                                case 1:
+                                    $oStylePrl->alignment = 'center';
+                                    break;
+                                case 2:
+                                    $oStylePrl->alignment = 'right';
+                                    break;
+                                case 3:
+                                case 4:
+                                case 5:
+                                    $oStylePrl->alignment = 'justified';
+                                    break;
+                                default:
+                                    $oStylePrl->alignment = 'left';
+                            }
+                            break;
+                        case 0x0A: // sprmPIlvl
+                            // print_r('sprmPIlvl : '.$operand.PHP_EOL.PHP_EOL);
+                            $oStylePrl->iLvl = $operand;
+                            break;
+                        case 0x0B: // sprmPIlfo, list format
+                            // print_r('sprm_IsPmd : ' . dechex($operand) . PHP_EOL.PHP_EOL);
+                            $oStylePrl->iLfo = $operand;
+                            if ($operand === 0x0000) {
+                                $oStylePrl->bList = false;
+                            } else if ($operand >= 0x0001 && $operand <= 0x07FE) {
+                                $oStylePrl->bList = true;
+                            } else if ($operand === 0xF801) {
+                                $oStylePrl->bList = false;
+                            } else if ($operand >= 0xF802 && $operand <= 0xFFFF) {
+                                $oStylePrl->bList = true;
+                                $oStylePrl->indentPreserved = true;
+                            }
+                            break;
+                        default:
+                            // print_r('sprm_IsPmd : ' . dechex($oSprm->isPmd) .PHP_EOL.PHP_EOL);
+                            break;
+                    }
                     break;
                 // Character property
                 case 0x02:
@@ -1866,6 +1917,9 @@ class MsDoc extends AbstractReader implements ReaderInterface
                     break;
                 // Picture property
                 case 0x03:
+                    if (defined('ECHO_DEBUG_ENABLE') && ECHO_DEBUG_ENABLE) {
+                        echo "\nPicture property\n";
+                    }
                     break;
                 // Section property
                 case 0x04:
@@ -2214,6 +2268,131 @@ class MsDoc extends AbstractReader implements ReaderInterface
         );
     }
 
+    private function generateTxt()
+    {
+        $clx = $this->getDocumentText($this->arrayFib, $this->data1Table, $this->dataData);
+
+        $textBlockList = $clx->textBlockList;
+
+        $num = count($textBlockList);
+
+        $mainStream = '';
+        for ($i = 0; $i < $num; $i++) {
+            $tTextBlock = $textBlockList[$i];
+
+            if (defined('ECHO_DEBUG_ENABLE') && ECHO_DEBUG_ENABLE) {
+                echo PHP_EOL . "start CP: " . $tTextBlock->startCP . ", end CP: " . $tTextBlock->endCP . PHP_EOL;
+
+                echo PHP_EOL . "start FC: " . $tTextBlock->ulCharPos . ", end FC: " . ($tTextBlock->ulCharPos + $tTextBlock->lToGo) . PHP_EOL;
+            }
+
+            $chars = substr($this->dataWorkDocument, $tTextBlock->ulCharPos, $tTextBlock->lToGo);
+            if ($tTextBlock->bUsesUnicode) {
+                $subText = iconv('UCS-2LE', 'UTF-8', $chars);
+            }
+
+            if ($subText === false) {
+                continue;
+            }
+
+            $subText = str_replace(chr(13), "\n", $subText);
+            $mainStream .= $subText;
+        }
+
+        $comment_chars = mb_substr($mainStream, $this->arrayFib['ccpText'] + $this->arrayFib['ccpFtn'] + $this->arrayFib['ccpHdd'], $this->arrayFib['ccpAtn'], 'UTF-8');
+
+        $mainStream = mb_substr($mainStream, 0, $this->arrayFib['ccpText'], 'UTF-8');
+
+        $comments = $this->readComments();
+        $totComments = count($comments);
+
+        $totParas = count($this->arrayParagraphs);
+        $pad = 0;
+        $startCPs = array();
+        for ($i =0; $i < $totParas; $i++) {
+            $para = $this->arrayParagraphs[$i];
+            for ($j = 0; $j < count($para->aFCs) - 1; $j++) {
+                $fc = $para->aFCs[$j];
+                $efc = $para->aFCs[$j + 1];
+                for ($k = 0; $k < $num; $k++) {
+                    $tTextBlock = $textBlockList[$k];
+                    if ($fc >= $tTextBlock->ulCharPos && $fc < $tTextBlock->ulCharPos + $tTextBlock->lToGo) {
+                        $dfc = $fc - $tTextBlock->ulCharPos;
+                        if ($tTextBlock->bUsesUnicode) {
+                            $dfc = $dfc >> 1;
+                        }
+                        $start_cp = $dfc + $tTextBlock->startCP;
+                    }
+
+                    if ($efc <= $tTextBlock->ulCharPos + $tTextBlock->lToGo) {
+                        $dfc = $efc - $tTextBlock->ulCharPos;
+                        if ($tTextBlock->bUsesUnicode) {
+                            $dfc = $dfc >> 1;
+                        }
+                        $end_cp = $dfc + $tTextBlock->startCP;
+                    }
+
+                    if (isset($start_cp) && isset($end_cp) && $end_cp > $start_cp) {
+                        $paraStyle = $para->aStyles[$j + 1];
+                        if (!empty($paraStyle) && isset($paraStyle->bList) && $paraStyle->bList) {
+                            if (defined('ECHO_DEBUG_ENABLE') && ECHO_DEBUG_ENABLE) {
+                                echo PHP_EOL . "paragraph start cp: " . $start_cp . ", end cp: " . $end_cp . PHP_EOL;
+                            }
+                            if (in_array($start_cp, $startCPs)) {
+                                continue;
+                            }
+                            $startCPs[] = $start_cp;
+                            $p = mb_substr($mainStream, 0, $start_cp + $pad, "UTF-8");
+                            $e = mb_substr($mainStream, $start_cp + $pad, null, "UTF-8");
+                            $mainStream = $p . "*\t" . $e;
+                            $pad += 2;
+                        }
+                    }
+                }
+            }
+        }
+
+        $mainStreams = explode(chr(0x05), $mainStream);
+
+        $comment_strs = array();
+        for ($i = 0; $i < $totComments; $i++) {
+            $comment = $comments[$i];
+            $comment['chars'] = mb_substr($comment_chars, $comment['start_cp'], $comment['length'], 'UTF-8');
+            $comment['chars'] = str_replace(chr(0x05), '', $comment['chars']);
+            $comment['chars'] = trim($comment['chars']);
+            if (empty($comment['chars'])) {
+                continue;
+            }
+            $comment_strs[] = $this->outputCommentTxt($comment, $i + 1);
+        }
+
+        $content = '';
+        foreach ($mainStreams as $key => $item) {
+            $content .= $item;
+            if (isset($comment_strs[$key]) && !empty($comment_strs[$key])) {
+                $content .= "(" . $comment_strs[$key] . ")";
+            }
+        }
+
+        if (defined('ECHO_DEBUG_ENABLE') && ECHO_DEBUG_ENABLE) {
+            echo $content;
+            echo "content length: " . mb_strlen($content, "UTF-8") . PHP_EOL;
+        }
+
+        return $content;
+    }
+
+    private function outputCommentTxt(&$comment, $i)
+    {
+        if (empty($comment)) {
+            return '';
+        }
+
+        $date_format = "%d/%d/%d %d:%d";
+        $lastDay = sprintf($date_format, $comment['yr'], $comment['mon'], $comment['dom'], $comment['hr'], $comment['minute']);
+        return sprintf("\033[7m批注[%d] %s:\e[0m \033[4m%s\033[0m", $i, $lastDay, $comment['chars']);
+    }
+
     private function generatePhpWord()
     {
         foreach ($this->arraySections as $itmSection) {
@@ -2223,8 +2402,15 @@ class MsDoc extends AbstractReader implements ReaderInterface
             $sHYPERLINK = '';
             foreach ($this->arrayParagraphs as $itmParagraph) {
                 $textPara = $itmParagraph;
+                $textParaLen = strlen($textPara);
                 foreach ($this->arrayCharacters as $oCharacters) {
-                    $subText = substr($textPara, $oCharacters->pos_start, $oCharacters->pos_len);
+                    $tmp = substr($textPara, $oCharacters->pos_start, $oCharacters->pos_len);
+                    $subText = iconv('UCS-2LE', 'UTF-8', $tmp);
+
+                    //$subText = mb_substr($textPara, $oCharacters->pos_start, $oCharacters->pos_len, 'utf-8');
+                    if ($subText === false) {
+                        continue;
+                    }
                     $subText = str_replace(chr(13), PHP_EOL, $subText);
                     $arrayText = explode(PHP_EOL, $subText);
                     if (end($arrayText) == '') {
@@ -2344,5 +2530,888 @@ class MsDoc extends AbstractReader implements ReaderInterface
             $ord24 = ($or24 & 127) << 24;
         }
         return ord($data[$pos]) | (ord($data[$pos+1]) << 8) | (ord($data[$pos+2]) << 16) | $ord24;
+    }
+
+    public static function pSectionSZ($x)
+    {
+        return (($x) * P_SECTIONLIST_SZ + P_LENGTH_SZ);
+    }
+
+    public static function analyseSystemInformationHeader($data)
+    {
+        $usLittleEndian = self::getInt2d($data, 0);
+
+        if ($usLittleEndian !== 0xFFFE) {
+            if (defined('ECHO_DEBUG_ENABLE') && ECHO_DEBUG_ENABLE) {
+                echo "bigendian\n";
+            }
+            return NULL;
+        }
+
+        $usEmpty =  self::getInt2d($data, 2);
+        if ($usEmpty != 0x0000) {
+            if (defined('ECHO_DEBUG_ENABLE') && ECHO_DEBUG_ENABLE) {
+                echo "usEmpty false\n";
+            }
+            return NULL;
+        }
+
+        $ulTmp = self::getInt4d($data, 4);
+        $usOS = ($ulTmp >> 16);
+	    $usVersion = ($ulTmp & 0xffff);
+
+        if (defined('ECHO_DEBUG_ENABLE') && ECHO_DEBUG_ENABLE) {
+            echo "OS Version: ";
+        }
+        switch ($usOS) {
+            case 0:
+                if (defined('ECHO_DEBUG_ENABLE') && ECHO_DEBUG_ENABLE) {
+                    echo "Win16";
+                }
+                break;
+            case 1:
+                if (defined('ECHO_DEBUG_ENABLE') && ECHO_DEBUG_ENABLE) {
+                    echo "MacOS";
+                }
+                break;
+            case 2:
+                if (defined('ECHO_DEBUG_ENABLE') && ECHO_DEBUG_ENABLE) {
+                    echo "Win32";
+                }
+                break;
+            default:
+                if (defined('ECHO_DEBUG_ENABLE') && ECHO_DEBUG_ENABLE) {
+                    echo $usOS;
+                }
+                break;
+        }
+        if (defined('ECHO_DEBUG_ENABLE') && ECHO_DEBUG_ENABLE) {
+            echo "usVersioin: " . $usVersion;
+            echo "\n";
+        }
+
+        $tSectionCount = self::getInt4d($data, 24);
+
+        if (defined('ECHO_DEBUG_ENABLE') && ECHO_DEBUG_ENABLE) {
+            echo "tSectionCount: {$tSectionCount}\n";
+        }
+	    if ($tSectionCount != 1 && $tSectionCount != 2) {
+            return NULL;
+        }
+
+        $aucSecLst = substr($data, P_HEADER_SZ, self::pSectionSZ($tSectionCount));
+
+        $ulTmp = self::getInt4d($aucSecLst, 0);
+        $ulTmp = self::getInt4d($aucSecLst, 4);
+        $ulTmp = self::getInt4d($aucSecLst, 8);
+        $ulTmp = self::getInt4d($aucSecLst, 12);
+        $ulOffset = self::getInt4d($aucSecLst, 16);
+
+        if ($ulOffset != P_HEADER_SZ + P_SECTIONLIST_SZ &&
+            $ulOffset != P_HEADER_SZ + 2 * P_SECTIONLIST_SZ) {
+            return NULL;
+        }
+
+        $tLength =
+            self::getInt4d($aucSecLst, $tSectionCount * P_SECTIONLIST_SZ);
+
+        $aucBuffer = substr($data, $ulOffset, $tLength);
+        return $aucBuffer;
+    }
+
+    private function getSystemInformation($data)
+    {
+        $aucBuffer = self::analyseSystemInformationHeader($data);
+
+        $res = array();
+
+        $tCount = self::getInt4d($aucBuffer, 4);
+
+        for ($tIndex = 0; $tIndex < $tCount; $tIndex++) {
+            $tPropID = self::getInt4d($aucBuffer, 8 + $tIndex * 8);
+		    $ulOffset = self::getInt4d($aucBuffer, 12 + $tIndex * 8);
+            $tPropType = self::getInt4d($aucBuffer, $ulOffset);
+
+            switch ($tPropID) {
+                case PID_CODEPAGE:
+                    if ($tPropType === VT_I2) {
+                        $res['codepage'] = self::getInt2d($aucBuffer, $ulOffset + 4);
+                    }
+                    break;
+                case PID_TITLE:
+                    if ($tPropType === VT_LPSTR) {
+                        if (isset($res['title'])) {
+                            $res['title'] .= self::szLpstr($ulOffset, $aucBuffer);
+                        } else {
+                            $res['title'] = self::szLpstr($ulOffset, $aucBuffer);
+                        }
+
+                        if (isset($res['codepage']) && !empty($res['codepage']) && isset(self::$CodePage[$res['codepage']])) {
+                            $res['title'] = iconv(self::$CodePage[$res['codepage']], 'UTF-8', $res['title']);
+                        }
+                    }
+                    break;
+                case PID_SUBJECT:
+                    if ($tPropType == VT_LPSTR) {
+                        $res['subject'] = self::szLpstr($ulOffset, $aucBuffer);
+                        if (isset($res['codepage']) && !empty($res['codepage']) && isset(self::$CodePage[$res['codepage']])) {
+                            $res['subject'] = iconv(self::$CodePage[$res['codepage']], 'UTF-8', $res['subject']);
+                        }
+                    }
+                    break;
+                case PID_AUTHOR:
+                    if ($tPropType == VT_LPSTR) {
+                        $res['author'] = self::szLpstr($ulOffset, $aucBuffer);
+                        if (isset($res['codepage']) && !empty($res['codepage']) && isset(self::$CodePage[$res['codepage']])) {
+                            $res['author'] = iconv(self::$CodePage[$res['codepage']], 'UTF-8', $res['author']);
+                        }
+                    }
+                    break;
+                case PID_APPNAME:
+                    if ($tPropType == VT_LPSTR) {
+                        $res['appname'] = self::szLpstr($ulOffset, $aucBuffer);
+                    }
+                    break;
+                case PID_CREATE_DTM:
+                    if ($tPropType == VT_FILETIME) {
+                        $res['created'] = $this->getFileTime($aucBuffer, $ulOffset);
+                    }
+                    break;
+                case PID_LASTSAVE_DTM:
+                    if ($tPropType == VT_FILETIME) {
+                        $res['lastModified'] = $this->getFileTime($aucBuffer, $ulOffset);
+                    }
+                    break;
+                case PIDSI_PAGECOUNT:
+                    if ($tPropType == VT_I4) {
+                        $res['pagecount'] = self::getInt4d($aucBuffer, $ulOffset + 4);
+                    }
+                    break;
+                case PIDSI_WORDCOUNT:
+                    if ($tPropType == VT_I4) {
+                        $res['wordcount'] = self::getInt4d($aucBuffer, $ulOffset + 4);
+                    }
+                    break;
+                case PIDSI_CHARCOUNT:
+                    if ($tPropType == VT_I4) {
+                        $res['charcount'] = self::getInt4d($aucBuffer, $ulOffset + 4);
+                    }
+                    break;
+            }
+        }
+
+        return $res;
+    }
+
+    /**
+     * getDocumentSummaryInfo - analyse the document summary information
+     * @param $data
+     * @return array
+     */
+    private function getDocumentSummaryInfo($data)
+    {
+        $aucBuffer = self::analyseSystemInformationHeader($data);
+        $tCount = self::getInt4d($aucBuffer, 4);
+
+        $res = array();
+        for($tIndex = 0; $tIndex < $tCount; $tIndex++)
+        {
+            $tPropID = self::getInt4d($aucBuffer, 8 + $tIndex * 8);
+            $ulOffset = self::getInt4d($aucBuffer, 12 + $tIndex * 8);
+            $tPropType = self::getInt4d($aucBuffer, $ulOffset);
+            switch ($tPropID) {
+                case PIDD_MANAGER:
+                    if ($tPropType == VT_LPSTR) {
+                        $res['manager'] = self::szLpstr($ulOffset, $aucBuffer);
+                    }
+                    break;
+                case PIDD_COMPANY:
+                    if ($tPropType == VT_LPSTR) {
+                        $res['company'] = self::szLpstr($ulOffset, $aucBuffer);
+                    }
+                    break;
+            }
+        }
+        return $res;
+    }
+
+    public static function isspace($char)
+    {
+        if ($char == '\t' || $char == ' ' || $char == '\r' || $char == '\n' || $char == '\v' || $char == '\f') {
+            return true;
+        }
+
+        return false;
+    }
+
+    public static function szLpstr($ulOffset, $aucBuffer)
+    {
+        $tSize = self::getInt4d($aucBuffer, $ulOffset + 4);
+
+        if ($tSize === 0) {
+            return NULL;
+        }
+
+        $szStart = $ulOffset + 8;
+
+        while(self::isspace($aucBuffer[$szStart])) {
+            $szStart++;
+        }
+
+        if (!isset($aucBuffer[$szStart]) || empty($aucBuffer[$szStart])) {
+            return NULL;
+        }
+
+        $s = array();
+        for($i=$szStart; $i < $szStart + $tSize; $i++) {
+            $s[] = $aucBuffer[$i];
+        }
+        $c = count($s);
+        for($i=$c;$i>0;$i--) {
+            if (self::isspace($s[$i -1]) || ord($s[$i - 1]) === 0) {
+                unset($s[$i]);
+            } else {
+                break;
+            }
+        }
+        return implode("", $s);
+    }
+
+    /**
+     * Common part of the file checking functions
+     * @param $data
+     * @param $bytes
+     * @return bool
+     */
+    private static function CheckBytes($data, $bytes)
+    {
+        $c = count($bytes);
+        for($i = 0; $i < $c; $i++) {
+            $n = ord($data[$i]);
+            if ($n !== $bytes[$i]) {
+                return false;
+            }
+        }
+    }
+
+    /**
+     * This function checks whether the given file is or is not a file with an
+     * OLE envelope (That is a document made by Word 6 or later)
+     * @param $data
+     * @param $fileSize
+     * @return bool
+     */
+    public static function IsWordFileWithOLE($data, $fileSize)
+    {
+        $iTailLen = null;
+
+        if (empty($data)) {
+            if (defined('ECHO_DEBUG_ENABLE') && ECHO_DEBUG_ENABLE) {
+                echo "No proper data given";
+            }
+            return FALSE;
+        }
+
+        if ($iTailLen < self::BIG_BLOCK_SIZE * 3) {
+            if (defined('ECHO_DEBUG_ENABLE') && ECHO_DEBUG_ENABLE) {
+                echo "This file is too small to be a Word document";
+            }
+            return false;
+        }
+
+        $iTailLen = intval(($fileSize % self::BIG_BLOCK_SIZE));
+        switch ($iTailLen) {
+            case 0:		/* No tail, as it should be */
+                break;
+            case 1:
+            case 2:		/* Filesize mismatch or a buggy email program */
+                if (intval(($fileSize % 3)) == $iTailLen) {
+                    if (defined('ECHO_DEBUG_ENABLE') && ECHO_DEBUG_ENABLE) {
+                        echo 'Filesize mismatch or a buggy email program';
+                    }
+                    return FALSE;
+                }
+                /*
+                 * Ignore extra bytes caused by buggy email programs.
+                 * They have bugs in their base64 encoding or decoding.
+                 * 3 bytes -> 4 ascii chars -> 3 bytes
+                 */
+                break;
+            default:	/* Wrong filesize for a Word document */
+                return FALSE;
+        }
+
+        return self::CheckBytes($data, self::$OLEBytes);
+    }
+
+    /**
+     * This function checks whether the given file is or is not a "Word for DOS"
+     * document
+     * @param $data
+     * @param $fileSize
+     * @return bool
+     */
+    public static function IsWordForDosFile($data, $fileSize)
+    {
+        if (empty($data)) {
+            if (defined('ECHO_DEBUG_ENABLE') && ECHO_DEBUG_ENABLE) {
+                echo "No proper data given";
+            }
+            return FALSE;
+        }
+        if ($fileSize < 128) {
+            if (defined('ECHO_DEBUG_ENABLE') && ECHO_DEBUG_ENABLE) {
+                echo "File too small to be a Word document";
+            }
+            return FALSE;
+        }
+        return self::CheckBytes($data, self::$DOSBytes);
+    }
+
+    /**
+     * This function checks whether the given file is or is not a "Mac Word 4 or 5"
+     * document
+     * @param $data
+     * @return bool
+     */
+    public static function IsMacWord45File($data)
+    {
+        foreach (self::$MacBytes as $macByte) {
+            if (self::CheckBytes($data, $macByte)) {
+                return TRUE;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * This function checks whether the given file is or is not a RTF document
+     * @param $data
+     * @return bool
+     */
+    public static function IsRtfFile($data)
+    {
+        return self::CheckBytes($data, self::$RTFBytes);
+    }
+
+    /**
+     * This function checks whether the given file is or is not a "Win Word 1 or 2"
+     * document
+     * @param $data
+     * @param $fileSize
+     * @return bool
+     */
+    public static function IsWinWord12File($data, $fileSize)
+    {
+        if ($fileSize < 384) {
+            if (defined('ECHO_DEBUG_ENABLE') && ECHO_DEBUG_ENABLE) {
+                echo "This file is too small to be a Word document";
+            }
+            return FALSE;
+        }
+
+        foreach (self::$Win12Bytes as $win12Byte) {
+            if (self::CheckBytes($data, $win12Byte)) {
+                return TRUE;
+            }
+        }
+        return FALSE;
+    }
+
+    /**
+     * This function checks whether the given file is or is not a WP document
+     * @param $data
+     * @return bool
+     */
+    public static function IsWordPerfectFile($data)
+    {
+        if (empty($data)) {
+            if (defined('ECHO_DEBUG_ENABLE') && ECHO_DEBUG_ENABLE) {
+                echo "No proper data given";
+            }
+            return FALSE;
+        }
+        return self::CheckBytes($data, self::$WPBytes);
+    }
+
+    /**
+     * iGuessVersionNumber - guess the Word version number from first few bytes
+     *
+     * Returns the guessed version number or -1 when no guess it possible
+     * @param $data
+     * @param $lFilesize
+     * @return int
+     */
+    public static function GuessVersionNumber($data, $lFilesize)
+    {
+        if(self::IsWordForDosFile($data, $lFilesize)) {
+            return 0;
+        }
+        if (self::IsWinWord12File($data, $lFilesize)) {
+            return 2;
+        }
+        if (self::IsMacWord45File($data)) {
+            return 5;
+        }
+        if (self::IsWordFileWithOLE($data, $lFilesize)) {
+            return 6;
+        }
+        return -1;
+    }
+
+    /**
+     * GetVersionNumber - get the Word version number from the header
+     *
+     * Returns the version number or -1 when unknown
+     * @param $aucHeader
+     * @param $bOldMacFile
+     * @return int
+     */
+    public static function GetVersionNumber($aucHeader, &$bOldMacFile)
+    {
+        $nFib = self::getInt2d($aucHeader, 0x02);
+        if ($nFib >= 0x1000) {
+            /* To big: must be MacWord using Big Endian */
+            $nFib = self::getInt2dBE($aucHeader, 0x02);
+        }
+
+        $bOldMacFile = FALSE;
+
+        switch ($nFib) {
+            case   0:
+                if (defined('ECHO_DEBUG_ENABLE') && ECHO_DEBUG_ENABLE) {
+                    echo "Word for DOS";
+                }
+                return 0;
+            case  28:
+                if (defined('ECHO_DEBUG_ENABLE') && ECHO_DEBUG_ENABLE) {
+                    echo "Word 4 for Macintosh";
+                }
+                $bOldMacFile = TRUE;
+                return 4;
+            case  33:
+                if (defined('ECHO_DEBUG_ENABLE') && ECHO_DEBUG_ENABLE) {
+                    echo "Word 1.x for Windows";
+                }
+                return 1;
+            case  35:
+                if (defined('ECHO_DEBUG_ENABLE') && ECHO_DEBUG_ENABLE) {
+                    echo "Word 5 for Macintosh";
+                }
+                $bOldMacFile = TRUE;
+                return 5;
+            case  45:
+                if (defined('ECHO_DEBUG_ENABLE') && ECHO_DEBUG_ENABLE) {
+                    echo "Word 2 for Windows";
+                }
+                return 2;
+            case 101:
+            case 102:
+                if (defined('ECHO_DEBUG_ENABLE') && ECHO_DEBUG_ENABLE) {
+                    echo "Word 6 for Windows";
+                }
+                return 6;
+            case 103:
+            case 104:
+                $usChse = self::getInt2d($aucHeader, 0x14);
+
+                switch ($usChse) {
+                    case 0:
+                        if (defined('ECHO_DEBUG_ENABLE') && ECHO_DEBUG_ENABLE) {
+                            echo "Word 7 for Win95";
+                        }
+                        return 7;
+                    case 256:
+                        if (defined('ECHO_DEBUG_ENABLE') && ECHO_DEBUG_ENABLE) {
+                            echo "Word 6 for Macintosh";
+                        }
+                        $bOldMacFile = TRUE;
+                        return 6;
+                    default:
+                        if (self::getInt1d($aucHeader, 0x05) == 0xe0) {
+                            if (defined('ECHO_DEBUG_ENABLE') && ECHO_DEBUG_ENABLE) {
+                                echo "Word 7 for Win95";
+                            }
+                            return 7;
+                        }
+                        if (defined('ECHO_DEBUG_ENABLE') && ECHO_DEBUG_ENABLE) {
+                            echo "Word 6 for Macintosh";
+                        }
+                        $bOldMacFile = TRUE;
+                        return 6;
+                }
+            default:
+                $usChse = self::getInt2d($aucHeader, 0x14);
+
+                if ($nFib < 192) {
+                    /* Unknown or unsupported version of Word */
+                    if (defined('ECHO_DEBUG_ENABLE') && ECHO_DEBUG_ENABLE) {
+                        echo "Unknown or unsupported version of Word";
+                    }
+                    return -1;
+                }
+
+                if ($usChse != 256) {
+                    if (defined('ECHO_DEBUG_ENABLE') && ECHO_DEBUG_ENABLE) {
+                        echo "Word97 for Win95/98/NT";
+                    }
+                }
+
+                if (usChse == 256) {
+                    if (defined('ECHO_DEBUG_ENABLE') && ECHO_DEBUG_ENABLE) {
+                        echo "Word98 for Macintosh";
+                    }
+                }
+
+                return 8;
+        }
+    }
+
+    /**
+     * Read 16-bit unsigned integer (Big Endian)
+     *
+     * @param string $data
+     * @param int $pos
+     * @return int
+     */
+    public static function getInt2dBE($data, $pos)
+    {
+        return ord($data[$pos]) << 8 | ord($data[$pos + 1]);
+    }
+
+    private function buildLfoList()
+    {
+        /* LFO (List Format Override) */
+
+        $lfoList = array();
+
+        $ulBeginLfoInfo = $this->arrayFib['fcPlfLfo'];
+        $tLfoInfoLen = $this->arrayFib['lcbPlfLfo'];
+
+        $aucLfoInfo = substr($this->data1Table, $ulBeginLfoInfo, $tLfoInfoLen);
+
+        $pos = 0;
+        $tRecords = self::getInt4d($aucLfoInfo, $pos);
+
+        if (4 + 16 * $tRecords > $tLfoInfoLen || $tRecords >= 0x7fff) {
+            /* Just a sanity check */
+            return false;
+        }
+
+        for ($i = 0; $i < $tRecords; $i++) {
+            $pos = 4 + 16 * $i;
+            $lfo = new \stdClass();
+            $lfo->lsid = self::getInt4d($aucLfoInfo, $pos);
+            $pos += 4;
+            $lfo->unused1 = self::getInt4d($aucLfoInfo, $pos);
+            $pos += 4;
+            $lfo->unused2 = self::getInt4d($aucLfoInfo, $pos);
+            $pos += 4;
+            $lfo->clfolvl = self::getInt1d($aucLfoInfo, $pos); // An unsigned integer that specifies the count of LFOLVL elements that are stored in the rgLfoLvl field of the LFOData element that corresponds to this LFO structure.
+            $pos += 1;
+            /*
+             Value
+Meaning
+0x00
+This LFO is not used for any field. The fAutoNum of the related LSTF MUST be set to 0.
+0xFC
+This LFO is used for the AUTONUMLGL field (see AUTONUMLGL in flt). The fAutoNum of the related LSTF MUST be set to 1.
+0xFD
+This LFO is used for the AUTONUMOUT field (see AUTONUMOUT in flt). The fAutoNum of the related LSTF MUST be set to 1.
+0xFE
+This LFO is used for the AUTONUM field (see AUTONUM in flt). The fAutoNum of the related LSTF MUST be set to 1.
+0xFF
+This LFO is not used for any field. The fAutoNum of the related LSTF MUST be set to 0.
+
+             */
+            $lfo->ibstFltAutoNum = self::getInt1d($aucLfoInfo, $pos); // An unsigned integer that specifies the field that this LFO represents.
+            $pos += 1;
+            $lfo->grfhic = self::getInt1d($aucLfoInfo, $pos);
+            $pos += 1;
+            $lfo->unused3 = self::getInt1d($aucLfoInfo, $pos);
+            $pos += 4;
+
+            $lfoList[$i] = $lfo;
+        }
+
+        return $lfoList;
+    }
+
+    /**
+     * Read Comment Document
+     *
+     * @return array
+     */
+    private function readComments()
+    {
+        $comments = array();
+        $offset = $this->arrayFib['fcPlcfandTxt'];
+        $lcbPlcfandTxt = $this->arrayFib['lcbPlcfandTxt'];
+
+        if ($lcbPlcfandTxt <= 0) {
+            return false;
+        }
+
+        $numCPs = (int) ($lcbPlcfandTxt / 4);
+
+        $aCPs = array();
+        for ($i = 0; $i < $numCPs; $i++) {
+            $aCPs[$i] = self::getInt4d($this->data1Table, $offset);
+            $offset += 4;
+        }
+
+        if ($aCPs[$numCPs - 2] !== $this->arrayFib['ccpAtn'] - 1) {
+            echo "invalid second-to-last cp : " . $aCPs[$numCPs - 2] . ", ccpAtn: " . $this->arrayFib['ccpAtn'] . PHP_EOL;
+        }
+
+        if (defined('ECHO_DEBUG_ENABLE') && ECHO_DEBUG_ENABLE) {
+            echo "comment cps: " . json_encode($aCPs) . PHP_EOL;
+        }
+
+        // Read XSTs
+        $fcGrpXstAtnOwners = $this->arrayFib['fcGrpXstAtnOwners'];
+        $lcbGrpXstAtnOwners = $this->arrayFib['lcbGrpXstAtnOwners']; // An unsigned integer that specifies the size, in bytes, of the XST array
+
+        $offset = $fcGrpXstAtnOwners;
+
+        $author_names = array();
+
+        while ($lcbGrpXstAtnOwners > 0) {
+            $cch = self::getInt2d($this->data1Table, $offset);
+            $offset += 2;
+            $author_name = substr($this->data1Table, $offset, $cch * 2);
+            $author_name = iconv('UCS-2LE', 'UTF-8', $author_name);
+            $author_names[] = $author_name;
+
+            $offset += $cch * 2;
+
+            $lcbGrpXstAtnOwners -= 2 + 2 * $cch;
+        }
+
+        $fcPlcfandRef = $this->arrayFib['fcPlcfandRef'];
+        $lcbPlcfandRef = $this->arrayFib['lcbPlcfandRef'];
+
+        if ($lcbPlcfandRef <= 0) {
+            return false;
+        }
+
+        $numRefCPs = $this->GetNumInLcb($lcbPlcfandRef, 30);
+
+        $refCPs = array();
+        $offset = $fcPlcfandRef;
+        for ($i = 0; $i <= $numRefCPs; $i++) {
+            $refCPs[$i] = self::getInt4d($this->data1Table, $offset);
+            $offset += 4;
+        }
+
+        if (defined('ECHO_DEBUG_ENABLE') && ECHO_DEBUG_ENABLE) {
+            echo "ref cps: " . json_encode($refCPs) . PHP_EOL;
+        }
+        $aATRDPre10 = array();
+        for ($i = 1; $i <= $numRefCPs; $i++) {
+            $cch = self::getInt2d($this->data1Table, $offset);
+            if ($cch > 9) {
+                if (defined('ECHO_DEBUG_ENABLE') && ECHO_DEBUG_ENABLE) {
+                    echo "bad file" . PHP_EOL;
+                }
+                return false;
+            }
+            $initial_author = substr($this->data1Table, $offset + 2, $cch * 2);
+            $initial_author = iconv('UCS-2LE', 'UTF-8', $initial_author);
+
+            $xstIndex = self::getInt2d($this->data1Table, $offset + 20);
+            $lTagBkmk = self::getInt4d($this->data1Table, $offset + 26);
+
+            $offset += 30;
+
+            $aATRDPre10[$i] = array(
+                'initial_author'    => $initial_author,
+                'bkmk_id'           => $lTagBkmk,
+                'xst_index'         => $xstIndex,
+                'author_name'       => $author_names[$xstIndex],
+            );
+        }
+
+        // AtrdExtra
+        $fcAtrdExtra = $this->arrayFib['fcAtrdExtra'];
+        $lcbAtrdExtra = $this->arrayFib['lcbAtrdExtra'];
+
+        $aAtrdExtra = array();
+        if ($lcbAtrdExtra > 0) {
+            $numAtrdExtra = $lcbAtrdExtra / 18;
+            if ($numAtrdExtra !== $numRefCPs) {
+                return false;
+            }
+
+            $offset = $fcAtrdExtra;
+
+            for ($i = 1; $i <= $numAtrdExtra; $i++) {
+                $dttm = self::getInt4d($this->data1Table, $offset);
+                $minute = $dttm & 0x3F;
+                $hr = ($dttm >> 6) & 0x1F;
+                $dom = ($dttm >> 11) & 0x1F;
+                $mon = ($dttm >> 16) & 0xF;
+                $yr = 1900 + (($dttm >> 20) & 0x1FF);
+                $wdy = ($dttm >> 29) & 0x7;
+                $offset += 4;
+                // padding1
+                $offset += 2;
+                $cDepth = self::getInt4d($this->data1Table, $offset);
+                $offset += 4;
+                $diatrdParent = self::getInt4d($this->data1Table, $offset);
+                $offset += 4;
+                $offset += 4;
+
+                $aAtrdExtra[$i] = array(
+                    'minute'    => $minute,
+                    'hr'        => $hr,
+                    'dom'       => $dom,
+                    'mon'       => $mon,
+                    'yr'        => $yr,
+                    'wdy'       => $wdy,
+                    'cDepth'    => $cDepth,
+                    'diatrdParent'  => $diatrdParent,
+                );
+            }
+        }
+
+        for ($i = 0; $i < $numCPs - 2; $i++) {
+            $comment = array();
+
+            $comment = array_merge($comment, $aATRDPre10[$i + 1]);
+
+            if (isset($aAtrdExtra[$i + 1]) && !empty($aAtrdExtra[$i + 1])) {
+                $comment = array_merge($comment, $aAtrdExtra[$i + 1]);
+            }
+
+            $comment['start_cp'] = $aCPs[$i];
+            $comment['length'] = $aCPs[$i + 1] - $aCPs[$i];
+            $comment['atn_cp'] = $refCPs[$i];
+
+            $comments[$i] = $comment;
+        }
+
+        if (defined('ECHO_DEBUG_ENABLE') && ECHO_DEBUG_ENABLE) {
+            echo "comments: " . json_encode($comments) . PHP_EOL;
+        }
+        return $comments;
+    }
+
+    /**
+     * Retrieving Text
+     *
+     * @return stdClass
+     */
+    private function getDocumentText()
+    {
+        $clx = new \stdClass();
+
+        $clx->styles = array();
+
+        $ulBeginTextInfo = $this->arrayFib['fcClx'];
+        $tTextInfoLen = $this->arrayFib['lcbClx'];
+
+        $aucBuffer = substr($this->data1Table, $ulBeginTextInfo, $tTextInfoLen);
+
+        $lOff = 0;
+
+        $tTextBlockList = array();
+        while ($lOff < $tTextInfoLen) {
+            $iType = self::getInt1d($aucBuffer, $lOff);
+            $lOff++;
+
+            if ($iType === 0x00) {
+                $lOff++;
+                continue;
+            }
+
+            if ($iType === 0x01) { // RgPrc element
+                $cbGrpprl = self::getInt2d($aucBuffer, $lOff);
+                $lOff += 2;
+                $oStyle = $this->readPrl($aucBuffer, $lOff, $cbGrpprl);
+                $clx->styles[] = $oStyle;
+                $lOff += $oStyle->length;
+                continue;
+            }
+
+            if ($iType !== 0x02) { // Not A Pcdt
+                if (defined('ECHO_DEBUG_ENABLE') && ECHO_DEBUG_ENABLE) {
+                    echo "Not A valid Pcdt\n";
+                }
+                return false;
+            }
+
+            // handle A Pcdt
+            $lcb = self::getInt4d($aucBuffer, $lOff);
+            $lOff += 4;
+
+            if ($lcb < 4) {
+                if (defined('ECHO_DEBUG_ENABLE') && ECHO_DEBUG_ENABLE) {
+                    echo "invalid pcdt\n";
+                }
+                return false;
+            }
+
+            $lPieces = $this->getNumInLcb($lcb, 8);
+
+            for ($i = 0; $i < $lPieces; $i++) {
+                $tTextBlock = new \stdClass();
+
+                $ulTextOffset = self::getInt4d($aucBuffer, $lOff + ($lPieces + 1) * 4 + $i * 8 + 2);
+                $usPropMod = self::getInt2d($aucBuffer, $lOff + ($lPieces + 1) * 4 + $i * 8 + 6);
+                $ulTotLength = self::getInt4d($aucBuffer, $lOff + ($i + 1) * 4) - self::getInt4d($aucBuffer, $lOff + $i * 4);
+
+                if (($ulTextOffset & self::BIT_30) === 0) {
+                    $bUsesUnicode = true;
+                } else {
+                    $bUsesUnicode = false;
+                    $ulTextOffset &= ~self::BIT_30;
+                    $ulTextOffset = $ulTextOffset >> 1;
+                }
+
+                $tTextBlock->ulCharPos = $ulTextOffset;
+                $tTextBlock->ulLength = $ulTotLength; // character size
+                $tTextBlock->bUsesUnicode = $bUsesUnicode;
+                $tTextBlock->usPropMod = $usPropMod;
+                $tTextBlock->startCP = self::getInt4d($aucBuffer, $lOff + $i * 4);
+                $tTextBlock->endCP = self::getInt4d($aucBuffer, $lOff + ($i + 1) * 4);
+                if ($bUsesUnicode) {
+                    $lToGo = $ulTotLength * 2;
+                } else {
+                    $lToGo = $ulTotLength;
+                }
+                $tTextBlock->lToGo = $lToGo; // byte size
+                $tTextBlockList[] = $tTextBlock;
+            }
+            break;
+        }
+
+        $clx->textBlockList = $tTextBlockList;
+
+        return $clx;
+    }
+
+    /**
+     * get a filetime property in seconds
+     *
+     * @param $aucBuffer
+     * @param $ulOffset
+     * @return int
+     */
+    private function getFileTime($aucBuffer, $ulOffset)
+    {
+        $ulLo = self::getInt4d($aucBuffer, $ulOffset + 4);
+        $ulHi = self::getInt4d($aucBuffer, $ulOffset + 8);
+
+        $dHi = $ulHi - TIME_OFFSET_HI;
+        $dLo = $ulLo - TIME_OFFSET_LO;
+
+        $dTmp = $dLo / 10000000.0; /* 10^7 */
+        $dTmp += $dHi * 429.4967926; /* 2^32 / 10^7 */
+
+        $tResult = $dTmp < 0.0 ? (int)($dTmp - 0.5) : (int)($dTmp + 0.5);
+
+        return $tResult;
     }
 }

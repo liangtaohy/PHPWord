@@ -20,12 +20,19 @@ namespace PhpOffice\PhpWord\Element;
 use PhpOffice\Common\Text as CommonText;
 use PhpOffice\PhpWord\Style\Font;
 use PhpOffice\PhpWord\Style\Paragraph;
+use PhpOffice\PhpWord\Style\Tab;
 
 /**
  * Text element
  */
 class Text extends AbstractElement
 {
+    /**
+     * Tab Styles
+     * @var
+     */
+    protected $tabStyles;
+
     /**
      * Text content
      *
@@ -59,6 +66,29 @@ class Text extends AbstractElement
         $this->setText($text);
         $paragraphStyle = $this->setParagraphStyle($paragraphStyle);
         $this->setFontStyle($fontStyle, $paragraphStyle);
+    }
+
+    /**
+     * Set Tab Style
+     * @param $type
+     * @param $position
+     * @param $leader
+     */
+    public function setTabStyle($type, $position, $leader)
+    {
+        if (!is_array($this->tabStyles)) {
+            $this->tabStyles = array();
+        }
+        $this->tabStyles[] = new Tab($type, $position, $leader);
+    }
+
+    /**
+     * Get Tab Styles
+     * @return array
+     */
+    public function getTabStyle()
+    {
+        return is_array($this->tabStyles) ? $this->tabStyles : array();
     }
 
     /**

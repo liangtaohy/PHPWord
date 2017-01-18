@@ -115,6 +115,26 @@ abstract class AbstractElement
     protected $collectionRelation = false;
 
     /**
+     * Unique id for comment
+     * @var int
+     */
+    protected $commentId = 0;
+
+    protected $delTextContent = '';
+
+    /**
+     * author
+     * @var string
+     */
+    protected $author = '';
+
+    /**
+     * created time
+     * @var string
+     */
+    protected $date = '';
+
+    /**
      * Get PhpWord
      *
      * @return \PhpOffice\PhpWord\PhpWord
@@ -143,6 +163,35 @@ abstract class AbstractElement
     public function getSectionId()
     {
         return $this->sectionId;
+    }
+
+    /**
+     * Unique Id for comment
+     * @return int
+     */
+    public function getCommentId()
+    {
+        return $this->commentId;
+    }
+
+    public function getDelTextContent() { return $this->delTextContent; }
+
+    /**
+     * comment author
+     * @return string
+     */
+    public function getAuthor()
+    {
+        return $this->author;
+    }
+
+    /**
+     * comment date
+     * @return string
+     */
+    public function getDate()
+    {
+        return $this->date;
     }
 
     /**

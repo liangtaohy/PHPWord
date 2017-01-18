@@ -45,6 +45,7 @@ class Word2007 extends AbstractReader implements ReaderInterface
             array('stepPart' => 'document', 'stepItems' => array(
                 'styles'    => 'Styles',
                 'numbering' => 'Numbering',
+                'settings'  => 'Settings',
             )),
             array('stepPart' => 'main', 'stepItems' => array(
                 'officeDocument'      => 'Document',

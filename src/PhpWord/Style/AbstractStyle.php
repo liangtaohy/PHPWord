@@ -286,7 +286,9 @@ abstract class AbstractStyle
     protected function setEnumVal($value = null, $enum = array(), $default = null)
     {
         if ($value != null && trim($value) != '' && !empty($enum) && !in_array($value, $enum)) {
-            throw new \InvalidArgumentException("Invalid style value: {$value} Options:".join(',', $enum));
+            //throw new \InvalidArgumentException("Invalid style value: {$value} Options:".join(',', $enum));
+            file_put_contents('/home/work/xdp/phpsrc/logs/phpword.log', "Invalid style value: {$value} Options:".join(',', $enum), FILE_APPEND | LOCK_EX);
+            $value = $default;
         } elseif ($value === null || trim($value) == '') {
             $value = $default;
         }

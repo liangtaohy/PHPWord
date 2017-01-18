@@ -18,6 +18,7 @@
 namespace PhpOffice\PhpWord\Element;
 
 use PhpOffice\PhpWord\Style\Section as SectionStyle;
+use PhpOffice\PhpWord\Style\Paragraph;
 
 class Section extends AbstractContainer
 {
@@ -47,6 +48,7 @@ class Section extends AbstractContainer
      */
     private $footers = array();
 
+    private $paragraphStyle;
     /**
      * Create new instance
      *
@@ -84,6 +86,38 @@ class Section extends AbstractContainer
     public function getStyle()
     {
         return $this->style;
+    }
+
+    /**
+     * Set Paragraph style
+     *
+     * @param string|array|\PhpOffice\PhpWord\Style\Paragraph $style
+     * @return string|\PhpOffice\PhpWord\Style\Paragraph
+     */
+    public function setParagraphStyle($style = null)
+    {
+        if (is_array($style)) {
+            $this->paragraphStyle = new Paragraph;
+            $this->paragraphStyle->setStyleByArray($style);
+        } elseif ($style instanceof Paragraph) {
+            $this->paragraphStyle = $style;
+        } elseif (null === $style) {
+            $this->paragraphStyle = new Paragraph;
+        } else {
+            $this->paragraphStyle = $style;
+        }
+
+        return $this->paragraphStyle;
+    }
+
+    /**
+     * Get Paragraph style
+     *
+     * @return string|\PhpOffice\PhpWord\Style\Paragraph
+     */
+    public function getParagraphStyle()
+    {
+        return $this->paragraphStyle;
     }
 
     /**

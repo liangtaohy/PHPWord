@@ -166,6 +166,15 @@ class Document extends AbstractPart
                 $this->readWSectPrNode($xmlReader, $sectPrNode, $section);
             }
             $section = $this->phpWord->addSection();
+        } else {
+            if ($xmlReader->elementExists('w:pPr', $node)) {
+                $paragraphStyle = $this->readParagraphStyle($xmlReader, $node);
+                if (is_array($paragraphStyle) && isset($paragraphStyle['styleName'])) {
+                    preg_match('/Heading(\d)/', $paragraphStyle['styleName'], $headingMatches);
+                }
+            }
+            $section->setParagraphStyle($paragraphStyle);
+            $section = $this->phpWord->addSection();
         }
     }
 

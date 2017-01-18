@@ -18,6 +18,7 @@
 namespace PhpOffice\PhpWord\Reader\Word2007;
 
 use PhpOffice\Common\XMLReader;
+use PhpOffice\PhpWord\Element\DrawingML;
 use PhpOffice\PhpWord\PhpWord;
 
 /**
@@ -167,14 +168,62 @@ abstract class AbstractPart
                 $parent->addTextBreak(null, $paragraphStyle);
             } else {
                 $nodes = $xmlReader->getElements('*', $domNode);
+                $runCount = $xmlReader->countElements('w:r', $domNode);
+                $linkCount = $xmlReader->countElements('w:hyperlink', $domNode);
+                $runLinkCount = $runCount + $linkCount;
                 foreach ($nodes as $node) {
-                    $this->readRun(
-                        $xmlReader,
-                        $node,
-                        ($runLinkCount > 1) ? $parent->addTextRun($paragraphStyle) : $parent,
-                        $docPart,
-                        $paragraphStyle
-                    );
+                    if (in_array($node->nodeName, array('w:ins'))) {
+                        $id = $xmlReader->getAttribute('w:id', $node);
+                        $author = $xmlReader->getAttribute('w:author', $node);
+                        $date = $xmlReader->getAttribute('w:date', $node);
+                        $textInserted = $parent->addTextInserted($id, $author, $date);
+
+                        $runCount1 = $xmlReader->countElements('w:r', $node);
+                        $linkCount1 = $xmlReader->countElements('w:hyperlink', $node);
+                        $runLinkCount1 = $runCount1 + $linkCount1;
+                        if ($runLinkCount1 > 0) {
+                            $wrs = $xmlReader->getElements('*', $node);
+                            foreach ($wrs as $wr) {
+                                $this->readRun(
+                                    $xmlReader,
+                                    $wr,
+                                    ($runLinkCount1 > 1) ? $textInserted->addTextRun($paragraphStyle) : $textInserted,
+                                    $docPart,
+                                    $paragraphStyle
+                                );
+                            }
+                        }
+                    } elseif (in_array($node->nodeName, array('w:del'))) {
+                        $id = $xmlReader->getAttribute('w:id', $node);
+                        $author = $xmlReader->getAttribute('w:author', $node);
+                        $date = $xmlReader->getAttribute('w:date', $node);
+                        // 删除的文字
+                        $delTexts = $xmlReader->getElements('w:r', $node);
+
+                        $delTextContent = '';
+                        foreach ($delTexts as $n) {
+                            $delTextContent .= $xmlReader->getValue('w:delText', $n);
+                        }
+                        file_put_contents('/home/work/xdp/phpsrc/logs/phpwords.log', "w:del {$delTextContent}\n",FILE_APPEND);
+                        $parent->addTextDeled($delTextContent, $id, $author, $date);
+                    } elseif (in_array($node->nodeName, array('w:drawing'))) {
+                        $ablips = $xmlReader->getElements('w:drawing/wp:inline/a:graphic/a:graphicData/pic:pic/pic:blipFill/a:blip', $node);
+                        $mode = 'inline';
+                        foreach ($ablips as $ablip) {
+                            $image_rid = $xmlReader->getAttribute('r:embed', $ablip);
+                            if (isset($this->rels['document'][$image_rid]) && is_array($this->rels['document'][$image_rid]) && isset($this->rels['document'][$image_rid]['target'])) {
+                                $parent->addDrawingML($image_rid, $this->rels['document'][$image_rid]['target'], $mode);
+                            }
+                        }
+                    } else {
+                        $this->readRun(
+                            $xmlReader,
+                            $node,
+                            ($runLinkCount > 1) ? $parent->addTextRun($paragraphStyle) : $parent,
+                            $docPart,
+                            $paragraphStyle
+                        );
+                    }
                 }
             }
         }
@@ -238,7 +287,21 @@ abstract class AbstractPart
             // TextRun
             } else {
                 $textContent = $xmlReader->getValue('w:t', $domNode);
-                $parent->addText($textContent, $fontStyle, $paragraphStyle);
+                $text = $parent->addText($textContent, $fontStyle, $paragraphStyle);
+                if ($xmlReader->elementExists('w:tab', $domNode)) {
+                    $wtabs = $xmlReader->getElements('w:tab', $domNode);
+                    foreach ($wtabs as $wtab) {
+                        $val = $xmlReader->getAttribute('w:val', $wtab);
+                        $pos = $xmlReader->getAttribute('w:pos', $wtab);
+                        $leader = $xmlReader->getAttribute('w:leader', $wtab);
+                        if (method_exists($text, 'setTabStyle')) {
+                            file_put_contents('/home/work/xdp/phpsrc/logs/phpwords.log', "w:tab {$val} {$pos} {$leader}\n",FILE_APPEND);
+                            $text->setTabStyle($val, $pos, $leader);
+                        } else {
+                            file_put_contents('/home/work/xdp/phpsrc/logs/phpwords.log', "text not method setTabStyle\n",FILE_APPEND);
+                        }
+                    }
+                }
             }
         }
     }
@@ -325,6 +388,7 @@ abstract class AbstractPart
             'next'            => array(self::READ_VALUE, 'w:next'),
             'indent'          => array(self::READ_VALUE, 'w:ind', 'w:left'),
             'hanging'         => array(self::READ_VALUE, 'w:ind', 'w:hanging'),
+            'firstLine'       => array(self::READ_VALUE, 'w:ind', 'w:firstLine'),
             'spaceAfter'      => array(self::READ_VALUE, 'w:spacing', 'w:after'),
             'spaceBefore'     => array(self::READ_VALUE, 'w:spacing', 'w:before'),
             'widowControl'    => array(self::READ_FALSE, 'w:widowControl'),

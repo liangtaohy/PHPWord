@@ -18,6 +18,7 @@
 namespace PhpOffice\PhpWord\Writer\HTML\Style;
 
 use PhpOffice\PhpWord\SimpleType\Jc;
+use PhpOffice\PHPWord\Style;
 
 /**
  * Paragraph style HTML writer
@@ -84,6 +85,19 @@ class Paragraph extends AbstractStyle
             $after = $spacing->getAfter();
             $css['margin-top'] = $this->getValueIf(!is_null($before), ($before / 20) . 'pt');
             $css['margin-bottom'] = $this->getValueIf(!is_null($after), ($after / 20) . 'pt');
+        }
+
+        // Indent
+        $indent = $style->getIndent();
+        if (!empty($indent)) {
+            $indent = intval($indent / (720 * 20)); // change to pt
+            $css['text-indent'] = $indent . "pt";
+        }
+
+        $firstLine = $style->getFirstLine();
+        if (!empty($firstLine)) {
+            $firstLine = intval($firstLine / (720 * 20)); // change to pt
+            $css['text-indent'] = $firstLine . "pt";
         }
 
         return $this->assembleCss($css);

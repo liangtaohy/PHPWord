@@ -83,7 +83,7 @@ abstract class AbstractContainer extends AbstractElement
             'ListItem', 'ListItemRun', 'Table', 'Image', 'Object',
             'Footnote', 'Endnote', 'CheckBox', 'TextBox', 'Field',
             'Line', 'Shape', 'Title', 'TOC', 'PageBreak',
-            'Chart', 'FormField', 'SDT'
+            'Chart', 'FormField', 'SDT', 'TextInserted', 'TextDeled', 'DrawingML'
         );
         $functions = array();
         foreach ($elements as $element) {
@@ -188,7 +188,7 @@ abstract class AbstractContainer extends AbstractElement
     private function checkValidity($method)
     {
         $generalContainers = array(
-            'Section', 'Header', 'Footer', 'Footnote', 'Endnote', 'Cell', 'TextRun', 'TextBox', 'ListItemRun',
+            'Section', 'Header', 'Footer', 'Footnote', 'Endnote', 'Cell', 'TextRun', 'TextBox', 'ListItemRun', 'TextInserted', 'TextDeled'
         );
 
         $validContainers = array(
@@ -203,12 +203,12 @@ abstract class AbstractContainer extends AbstractElement
             'Shape'         => $generalContainers,
             'FormField'     => $generalContainers,
             'SDT'           => $generalContainers,
-            'TextRun'       => array('Section', 'Header', 'Footer', 'Cell', 'TextBox'),
-            'ListItem'      => array('Section', 'Header', 'Footer', 'Cell', 'TextBox'),
-            'ListItemRun'   => array('Section', 'Header', 'Footer', 'Cell', 'TextBox'),
-            'Table'         => array('Section', 'Header', 'Footer', 'Cell', 'TextBox'),
+            'TextRun'       => array('Section', 'Header', 'Footer', 'Cell', 'TextBox', 'TextInserted', 'TextDeled'),
+            'ListItem'      => array('Section', 'Header', 'Footer', 'Cell', 'TextBox', 'TextInserted', 'TextDeled'),
+            'ListItemRun'   => array('Section', 'Header', 'Footer', 'Cell', 'TextBox', 'TextInserted', 'TextDeled'),
+            'Table'         => array('Section', 'Header', 'Footer', 'Cell', 'TextBox', 'TextInserted', 'TextDeled'),
             'CheckBox'      => array('Section', 'Header', 'Footer', 'Cell'),
-            'TextBox'       => array('Section', 'Header', 'Footer', 'Cell'),
+            'TextBox'       => array('Section', 'Header', 'Footer', 'Cell', 'TextInserted', 'TextDeled'),
             'Footnote'      => array('Section', 'TextRun', 'Cell'),
             'Endnote'       => array('Section', 'TextRun', 'Cell'),
             'PreserveText'  => array('Header', 'Footer', 'Cell'),
@@ -216,6 +216,8 @@ abstract class AbstractContainer extends AbstractElement
             'TOC'           => array('Section'),
             'PageBreak'     => array('Section'),
             'Chart'         => array('Section'),
+            'TextInserted'  => array('Section'),
+            'DrawingML'     => array('Section'),
         );
 
         // Special condition, e.g. preservetext can only exists in cell when
@@ -229,7 +231,7 @@ abstract class AbstractContainer extends AbstractElement
         // Check if a method is valid for current container
         if (isset($validContainers[$method])) {
             if (!in_array($this->container, $validContainers[$method])) {
-                throw new \BadMethodCallException("Cannot add {$method} in {$this->container}.");
+                //throw new \BadMethodCallException("Cannot add {$method} in {$this->container}.");
             }
         }
 

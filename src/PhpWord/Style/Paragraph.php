@@ -168,7 +168,7 @@ class Paragraph extends Border
     public function setStyleValue($key, $value)
     {
         $key = Text::removeUnderscorePrefix($key);
-        if ('indent' == $key || 'hanging' == $key) {
+        if ('indent' == $key || 'hanging' == $key || 'firstLine' == $key) {
             $value = $value * 720;
         } elseif ('spacing' == $key) {
             $value += 240; // because line height of 1 matches 240 twips
@@ -374,6 +374,23 @@ class Paragraph extends Border
     public function setHanging($value = null)
     {
         return $this->setIndentation(array('hanging' => $value));
+    }
+
+    /**
+     * @return mixed
+     */
+    public function getFirstLine()
+    {
+        return $this->getChildStyleValue($this->indentation, 'firstLine');
+    }
+
+    /**
+     * @param null $value
+     * @return Paragraph
+     */
+    public function setFirstLine($value = null)
+    {
+        return $this->setIndentation(array('firstLine' => $value));
     }
 
     /**

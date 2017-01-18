@@ -57,6 +57,7 @@ class Head extends AbstractPart
 
         $content .= '<head>' . PHP_EOL;
         $content .= '<meta charset="UTF-8" />' . PHP_EOL;
+        $content .= '<meta name="viewport" content="width=device-width, initial-scale=1" />' . PHP_EOL;
         $content .= '<title>' . $title . '</title>' . PHP_EOL;
         foreach ($propertiesMapping as $key => $value) {
             $value = ($value == '') ? $key : $value;
@@ -106,6 +107,17 @@ class Head extends AbstractPart
             'td' => array(
                 'border' => '1px solid black',
             ),
+            'span.ins-com' => array(
+                'color' => 'teal'
+            ),
+            'span.del-com'  => array(
+                'text-decoration'   => 'line-through',
+                'color' => 'red',
+            ),
+            'del.del-com'  => array(
+                'background-color'=>'red',
+                'color' => 'white',
+            )
         );
         foreach ($defaultStyles as $selector => $style) {
             $styleWriter = new GenericStyleWriter($style);
@@ -126,7 +138,7 @@ class Head extends AbstractPart
                     $css .= "{$name} {" . $styleWriter->write() . '}'  . PHP_EOL;
                 } elseif ($style instanceof Paragraph) {
                     $styleWriter = new ParagraphStyleWriter($style);
-                    $name = '.' . $name;
+                    $name = '.p' . $name;
                     $css .= "{$name} {" . $styleWriter->write() . '}'  . PHP_EOL;
                 }
             }

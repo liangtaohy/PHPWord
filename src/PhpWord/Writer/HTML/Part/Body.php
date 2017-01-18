@@ -39,6 +39,7 @@ class Body extends AbstractPart
         $content = '';
 
         $content .= '<body>' . PHP_EOL;
+        //$content .= '<div style="width:649px;border:1px solid #000000;">';
         $sections = $phpWord->getSections();
         foreach ($sections as $section) {
             $writer = new Container($this->getParentWriter(), $section);
@@ -46,6 +47,7 @@ class Body extends AbstractPart
         }
 
         $content .= $this->writeNotes();
+        //$content .= '</div>';
         $content .= '</body>' . PHP_EOL;
 
         return $content;

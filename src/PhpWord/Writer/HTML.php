@@ -90,7 +90,7 @@ class HTML extends AbstractWriter implements WriterInterface
         $content .= $this->getWriterPart('Head')->write();
         $content .= $this->getWriterPart('Body')->write();
         $content .= '</html>' . PHP_EOL;
-
+        
         return $content;
     }
 

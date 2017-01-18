@@ -115,6 +115,18 @@ class DocInfo
     private $customProperties = array();
 
     /**
+     * Main Document Character Length
+     * @var int
+     */
+    private $mainStreamSize;
+
+    /**
+     * Commnet Document Character Length
+     * @var
+     */
+    private $commentSize;
+
+    /**
      * Create new instance
      */
     public function __construct()
@@ -130,6 +142,8 @@ class DocInfo
         $this->category       = '';
         $this->company        = '';
         $this->manager        = '';
+        $this->mainStreamSize   = 0;
+        $this->commentSize      = 0;
     }
 
     /**
@@ -381,6 +395,48 @@ class DocInfo
     public function setManager($value = '')
     {
         $this->manager = $this->setValue($value, '');
+
+        return $this;
+    }
+
+    /**
+     * Get Main Document Character Length
+     * @return int
+     */
+    public function getMainStreamSize()
+    {
+        return $this->mainStreamSize;
+    }
+
+    /**
+     * Set Main Document Character Length
+     * @param int $value
+     * @return $this
+     */
+    public function setMainStreamSize($value = 0)
+    {
+        $this->mainStreamSize = $value;
+
+        return $this;
+    }
+
+    /**
+     * Get Comment Document Character Length
+     * @return int
+     */
+    public function getCommentSize()
+    {
+        return $this->commentSize;
+    }
+
+    /**
+     * Set Comment Document Character Length
+     * @param int $value
+     * @return $this
+     */
+    public function setCommentSize($value = 0)
+    {
+        $this->commentSize = $value;
 
         return $this;
     }

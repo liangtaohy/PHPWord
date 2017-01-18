@@ -218,7 +218,7 @@ class OLERead
      * @param int $blSectorId Sector ID where the stream starts
      * @return string Data for standard stream
      */
-    private function readData($blSectorId)
+    private function  readData($blSectorId)
     {
         $block = $blSectorId;
         $data = '';
