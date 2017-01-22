@@ -47,7 +47,8 @@
         "phploc/phploc": "2.*",
         "dompdf/dompdf":"0.6.*",
         "tecnickcom/tcpdf": "6.*",
-        "mpdf/mpdf": "5.*"
+        "mpdf/mpdf": "5.*",
+	"smalot/pdfparser":"0.10.0"
     },
     "suggest": {
         "ext-zip": "Allows writing OOXML and ODF",
